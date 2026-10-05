@@ -1,0 +1,25 @@
+# Pipstax monorepo: frontend/ (Next.js) + api/ (Express + TypeORM + Postgres). Code only - never data or secrets.
+node_modules/
+.next/
+dist/
+build/
+tmp/
+*.tsbuildinfo
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+.DS_Store
+._*
+.idea/
+.vscode/
+# Plesk host files
+.php-ini
+.php-version
+.htaccess*
+*.plesk-default.bak
+.well-known/
+# runtime uploads (customer/tenant documents) are data, not code
+api/public/uploads/

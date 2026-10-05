@@ -1,0 +1,97 @@
+name: Deploy Production
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pipstacks-backend-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      GIT_SHA: ${{ github.sha }}
+      EC2_HOST: ${{ secrets.EC2_HOST }}
+      EC2_USER: ${{ secrets.EC2_USER }}
+      EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload backend release
+        env:
+          RELEASE_DIR: /tmp/pipstacks-backend-${{ github.sha }}
+        run: |
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "${EC2_USER}@${EC2_HOST}" "mkdir -p '${RELEASE_DIR}'"
+          rsync -az --delete \
+            --exclude '.git' \
+            --exclude 'node_modules' \
+            --exclude 'dist' \
+            --exclude '.env' \
+            --exclude '.env.*' \
+            --exclude 'public/uploads' \
+            -e "ssh -i ~/.ssh/id_ed25519" \
+            ./ "${EC2_USER}@${EC2_HOST}:${RELEASE_DIR}/"
+
+      - name: Deploy backend on EC2
+        env:
+          RELEASE_DIR: /tmp/pipstacks-backend-${{ github.sha }}
+        run: |
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "${EC2_USER}@${EC2_HOST}" "export GIT_SHA='${GIT_SHA}' RELEASE_DIR='${RELEASE_DIR}'; flock /tmp/pipstacks-production-deploy.lock bash -s" <<'EOF'
+          set -euo pipefail
+          APP_DIR=/var/www/pipstacks/backend
+          trap 'rm -rf "$RELEASE_DIR"' EXIT
+          mkdir -p "$APP_DIR"
+          rsync -az \
+            --delete \
+            --exclude '.git' \
+            --exclude 'node_modules' \
+            --exclude 'dist' \
+            --exclude '.env' \
+            --exclude '.env.*' \
+            --exclude 'public/uploads' \
+            "$RELEASE_DIR"/ "$APP_DIR"/
+          mkdir -p "$APP_DIR/public/uploads"
+          cd "$APP_DIR"
+          npm ci --no-audit --no-fund
+          npm run build
+          npm run db:account-verifications
+          npm run db:lookup-options
+          npm run db:tenant-ui-preferences
+          npm run db:audit-columns
+          npm run db:job-address
+          npm run db:job-expense-category
+          npm run db:job-time-entries
+          npm run db:job-activity-payments
+          npm run db:notification-target-url
+          npm run backfill:doc-numbers
+          npm run db:compliance-renewal-value
+          npm run db:planner-entries
+          npm run db:planner-note-reminders
+          export DB_SYNC=false
+          pm2 restart pipstacks-api --update-env
+          APP_PORT="$(node -r dotenv/config -e "console.log(process.env.PORT || 5000)")"
+          echo "Waiting for pipstacks-api on port ${APP_PORT}"
+          if ! timeout 120 bash -lc "until curl -fsS http://127.0.0.1:${APP_PORT}/api/v1/health >/dev/null; do sleep 2; done"; then
+            echo "pipstacks-api health check failed on port ${APP_PORT}"
+            pm2 describe pipstacks-api || true
+            pm2 logs pipstacks-api --lines 120 --nostream || true
+            ss -ltnp || true
+            exit 1
+          fi
+          EOF

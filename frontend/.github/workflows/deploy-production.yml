@@ -1,0 +1,71 @@
+name: Deploy Production
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pipstacks-tenant-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      GIT_SHA: ${{ github.sha }}
+      EC2_HOST: ${{ secrets.EC2_HOST }}
+      EC2_USER: ${{ secrets.EC2_USER }}
+      EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload tenant release
+        env:
+          RELEASE_DIR: /tmp/pipstacks-tenant-${{ github.sha }}
+        run: |
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "${EC2_USER}@${EC2_HOST}" "mkdir -p '${RELEASE_DIR}'"
+          rsync -az --delete \
+            --exclude '.git' \
+            --exclude 'node_modules' \
+            --exclude '.next' \
+            --exclude '.env' \
+            --exclude '.env.*' \
+            -e "ssh -i ~/.ssh/id_ed25519" \
+            ./ "${EC2_USER}@${EC2_HOST}:${RELEASE_DIR}/"
+
+      - name: Deploy tenant on EC2
+        env:
+          RELEASE_DIR: /tmp/pipstacks-tenant-${{ github.sha }}
+        run: |
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "${EC2_USER}@${EC2_HOST}" "export GIT_SHA='${GIT_SHA}' RELEASE_DIR='${RELEASE_DIR}'; flock /tmp/pipstacks-production-deploy.lock bash -s" <<'EOF'
+          set -euo pipefail
+          APP_DIR=/var/www/pipstacks/tenant
+          trap 'rm -rf "$RELEASE_DIR"' EXIT
+          mkdir -p "$APP_DIR"
+          rsync -az --delete \
+            --exclude '.git' \
+            --exclude 'node_modules' \
+            --exclude '.next' \
+            --exclude '.env' \
+            --exclude '.env.*' \
+            "$RELEASE_DIR"/ "$APP_DIR"/
+          cd "$APP_DIR"
+          npm ci --no-audit --no-fund
+          npm run build
+          pm2 restart pipstacks-tenant --update-env
+          timeout 120 bash -lc 'until curl -fsSI http://127.0.0.1:3200/common-login >/dev/null; do sleep 2; done'
+          EOF
