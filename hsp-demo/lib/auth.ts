@@ -1,7 +1,8 @@
-// Microsoft sign-in for the hosted demo (OIDC auth-code flow, multi-tenant "organizations" endpoint).
+// Microsoft sign-in for the hosted demo: secretless OIDC id_token flow (response_type=id_token, form_post) on the
+// multi-tenant "organizations" endpoint; the id_token's RS256 signature is checked against the issuing tenant's JWKS.
 // Only the addresses in HSP_DEMO_ALLOW ("email|tenantId,email|tenantId") get a session; everyone else is refused.
-// Secrets (client secret + session key) come from a root-only file handed to the service by systemd
-// (LoadCredential=hsp-demo-secrets) - never from the repo or a hand-edited .env.
+// The session key comes from a root-only file handed to the service by systemd (LoadCredential=hsp-demo-secrets) -
+// never from the repo or a hand-edited .env. The client id is not secret (HSP_DEMO_CLIENT_ID).
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -12,7 +13,9 @@ export const SESSION_COOKIE = 'hspd_session';
 export const FLOW_COOKIE = 'hspd_flow';
 const SESSION_HOURS = 12;
 
-type Secrets = { clientId: string; clientSecret: string; sessionKey: string };
+export const CLIENT_ID = process.env.HSP_DEMO_CLIENT_ID || '';
+
+type Secrets = { sessionKey: string };
 let secrets: Secrets | null = null;
 export function getSecrets(): Secrets {
   if (secrets) return secrets;
@@ -70,18 +73,53 @@ export function sessionFrom(cookieHeader: string | null): Session | null {
 
 export const newSession = (email: string, name: string, tid: string) => sign({ email, name, tid, exp: Date.now() + SESSION_HOURS * 3600e3 });
 
-export function cookie(name: string, value: string, maxAgeSec: number) {
-  return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAgeSec}`;
+// sameSite 'None' for the flow cookie: Microsoft's form_post back to /auth/callback is a cross-site POST, which
+// would not carry a Lax cookie.
+export function cookie(name: string, value: string, maxAgeSec: number, sameSite: 'Lax' | 'None' = 'Lax') {
+  return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; Secure; SameSite=${sameSite}; Max-Age=${maxAgeSec}`;
 }
 
 export const randomToken = () => crypto.randomBytes(24).toString('base64url');
 
-// id_token payload. It comes straight from Microsoft's token endpoint over TLS in exchange for our code + client
-// secret, so per OIDC core 3.1.3.7 the TLS check stands in for the signature check; we still verify aud, iss,
-// tid, nonce and expiry.
-export function decodeIdToken(idToken: string): any {
-  const part = idToken.split('.')[1];
-  return JSON.parse(Buffer.from(part, 'base64url').toString('utf8'));
+// ---- id_token verification (RS256 against the issuing tenant's published keys) ----
+const jwksCache = new Map<string, { at: number; keys: any[] }>();
+async function tenantKeys(tid: string, force = false): Promise<any[]> {
+  const c = jwksCache.get(tid);
+  if (c && !force && Date.now() - c.at < 6 * 3600e3) return c.keys;
+  const r = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(tid)}/discovery/v2.0/keys`);
+  if (!r.ok) throw new Error('keys fetch failed');
+  const keys = (await r.json()).keys || [];
+  jwksCache.set(tid, { at: Date.now(), keys });
+  return keys;
+}
+const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+// Returns the verified claims, or throws with a reason. Checks: structure, alg RS256, signature (kid from the
+// tenant's JWKS, refetched once if the kid is unknown), aud = our client id, iss = that tenant's v2 issuer,
+// nonce, exp/nbf (2 min skew).
+export async function verifyIdToken(idToken: string, nonce: string): Promise<any> {
+  const parts = String(idToken || '').split('.');
+  if (parts.length !== 3) throw new Error('malformed token');
+  let header: any, claims: any;
+  try {
+    header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
+    claims = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+  } catch { throw new Error('malformed token'); }
+  if (header.alg !== 'RS256' || !header.kid) throw new Error('unexpected token type');
+  const tid = String(claims.tid || '').toLowerCase();
+  if (!GUID.test(tid)) throw new Error('no tenant');
+  let jwk = (await tenantKeys(tid)).find((k) => k.kid === header.kid);
+  if (!jwk) jwk = (await tenantKeys(tid, true)).find((k) => k.kid === header.kid);
+  if (!jwk) throw new Error('unknown signing key');
+  const key = crypto.createPublicKey({ key: { kty: jwk.kty, n: jwk.n, e: jwk.e }, format: 'jwk' });
+  const ok = crypto.verify('RSA-SHA256', Buffer.from(`${parts[0]}.${parts[1]}`), key, Buffer.from(parts[2], 'base64url'));
+  if (!ok) throw new Error('bad signature');
+  const now = Date.now() / 1000;
+  if (!CLIENT_ID || claims.aud !== CLIENT_ID) throw new Error('wrong audience');
+  if (claims.iss !== `https://login.microsoftonline.com/${tid}/v2.0`) throw new Error('wrong issuer');
+  if (!nonce || claims.nonce !== nonce) throw new Error('nonce mismatch');
+  if (!(claims.exp > now - 120) || (claims.nbf && claims.nbf > now + 120)) throw new Error('token expired');
+  return claims;
 }
 
 export const page = (title: string, body: string, status = 200) =>
