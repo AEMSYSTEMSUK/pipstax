@@ -27,7 +27,7 @@ const KINDS: Record<string, { title: (id?: string) => string; w: number; h: numb
 };
 
 const MENUS: { name: string; ico?: string; items: ([string, string, string?] | '-')[] }[] = [
-  { name: 'File', items: [['Desktop', 'dashboard', 'D'], '-', ['Printer Setup…', '', ''], ['Change Company…', '', ''], '-', ['Exit System', 'exit', '']] },
+  { name: 'File', items: [['Desktop', 'dashboard', 'D'], '-', ['Printer Setup…', '', ''], ['Change Company…', '', ''], '-', ['Sign Out', 'logout', ''], ['Exit System', 'exit', '']] },
   { name: 'Sales', items: [['Sales Order Enquiry', 'soList', 'S'], ['Customer Price Books', '', ''], ['Quotations', '', ''], '-', ['Delivery Notes', 'dnList', ''], ['Certificates of Conformity', 'cocList', '']] },
   { name: 'Production', items: [['Part Enquiry', 'partList', 'P'], ['Works Order Enquiry', 'woList', 'W'], ['Shop Floor Booking', 'woList', ''], '-', ['Bills of Materials', 'partList', ''], ['Routings', 'partList', ''], ['MRP', '', '']] },
   { name: 'Purchasing', items: [['Purchase Order Enquiry', 'poList', 'O'], ['Goods Received', 'grnList', 'G'], ['Subcontract', 'poList', ''], ['Suppliers', '', '']] },
@@ -55,6 +55,7 @@ export default function Desktop() {
 
   const open = useCallback((kind: string, id?: string) => {
     if (kind === 'exit') return toast('This is a demo - there is nothing to exit');
+    if (kind === 'logout') { location.href = '/auth/logout'; return; }
     if (kind === 'cascade') return setWins((ws0) => ws0.map((w, i) => ({ ...w, x: 20 + i * 26, y: 14 + i * 26, max: false })));
     if (kind === 'closeAll') return setWins([]);
     const def = KINDS[kind]; if (!def) return toast('Not part of this demo');

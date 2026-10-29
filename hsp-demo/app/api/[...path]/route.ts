@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as D from '../../../lib/data';
+import { sessionFrom } from '../../../lib/auth';
+
+const unauth = () => NextResponse.json({ error: 'not signed in' }, { status: 401 });
 
 export const dynamic = 'force-dynamic';
 
 // GET /api/lists | /api/dashboard | /api/part/<id> | /api/so/<id> | /api/wo/<id> | /api/po/<id> | /api/dn/<id> | /api/inv/<id> | /api/stock?part=&store=
 export async function GET(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
+  if (!sessionFrom(req.headers.get('cookie'))) return unauth();
   const [kind, ...rest] = (await ctx.params).path;
   const id = decodeURIComponent(rest.join('/'));
   const q = req.nextUrl.searchParams;
@@ -27,6 +31,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
 
 // POST /api/book {wo,op,clock,good,scrap,mins} | /api/receive {po,line,qty,cert,advice}
 export async function POST(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
+  if (!sessionFrom(req.headers.get('cookie'))) return unauth();
   const [kind] = (await ctx.params).path;
   const body = await req.json();
   try {

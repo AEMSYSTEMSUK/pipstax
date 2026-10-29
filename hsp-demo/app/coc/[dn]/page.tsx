@@ -1,5 +1,7 @@
 // Printable Certificate of Conformity for one delivery note (Steve's must-have - their current ones are Word docs).
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
+import { headers } from 'next/headers';
+import { sessionFrom } from '../../../lib/auth';
 import { COMPANY, coc } from '../../../lib/data';
 import PrintButton from '../../../components/PrintButton';
 import './coc.css';
@@ -10,6 +12,7 @@ const ukDate = (s: string) => (s && s.length >= 10 ? `${s.slice(8, 10)}/${s.slic
 const q = (v: number) => (v || 0).toLocaleString('en-GB', { maximumFractionDigits: 3 });
 
 export default async function CocPage({ params }: { params: Promise<{ dn: string }> }) {
+  if (!sessionFrom((await headers()).get('cookie'))) redirect('/auth/login');
   const { dn } = await params;
   const c = coc(decodeURIComponent(dn));
   if (!c) notFound();
