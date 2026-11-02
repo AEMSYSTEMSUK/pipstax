@@ -50,6 +50,7 @@ import { PlannerNote } from '../entities/planner-note.entity';
 import { PlannerEntry } from '../entities/planner-entry.entity';
 import { LookupOption } from '../entities/lookup-option.entity';
 import { JobActivity } from '../entities/job-activity.entity';
+import { AiPlatformSettings, AiTenantSettings, AiSpace, AiAction, AiRun, AiProposal } from '../entities/ai-workspace.entity';
 
 const useUrl = Boolean(env.db.url);
 
@@ -116,6 +117,12 @@ export const AppDataSource = new DataSource({
     TenantDocumentSequence,
     PlatformAdmin,
     PlatformRole,
-    ActiveTimer
+    ActiveTimer,
+    AiPlatformSettings,
+    AiTenantSettings,
+    AiSpace,
+    AiAction,
+    AiRun,
+    AiProposal
   ]
 });
