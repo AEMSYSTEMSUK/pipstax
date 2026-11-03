@@ -3,7 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 // One Claude Messages call with tools for the AI Workspace tool loop (official SDK, manual loop - the loop needs a
 // spend-cap check, permission-scoped tools and an audit trail between turns).
 
-export const DEFAULT_MODEL = 'claude-opus-5-5';
+export const DEFAULT_MODEL = 'claude-sonnet-5-5';
 export const MODEL_CHOICES = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'];
 
 // List prices, USD per 1M tokens (Nov 2026). Cache reads bill at 0.1x input, 5-minute cache writes at 1.25x.
