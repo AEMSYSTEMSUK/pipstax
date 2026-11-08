@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { AppHeader } from "@/components/layout/AppHeader"
 import { AppSidebar } from "@/components/layout/AppSidebar"
 import Link from "next/link"
-import { LayoutDashboard, Users, Settings, Briefcase, Calendar, FileText, FileSpreadsheet, HardHat, Ticket, Clock, PieChart, User, AlertTriangle, CheckSquare, CalendarClock, ClipboardCheck, TrendingUp } from "lucide-react"
+import { LayoutDashboard, Users, Settings, Briefcase, Calendar, FileText, FileSpreadsheet, HardHat, Ticket, Clock, PieChart, User, AlertTriangle, CheckSquare, CalendarClock, ClipboardCheck, TrendingUp, Sparkles } from "lucide-react"
 import { getAuth, clearAuth, setEffectivePermissions } from "@/lib/auth"
 import { apiGet } from "@/lib/api"
 import { applyTenantTheme } from "@/lib/theme"
@@ -34,6 +34,7 @@ const navItems = [
     { name: "Reports", href: "/admin/reports", icon: <PieChart className="h-4 w-4" />, permission: "reports.view" },
     { name: "Renewals", href: "/admin/renewals", icon: <CalendarClock className="h-4 w-4" />, permission: "reports.view", featureFlag: "renewals" },
     { name: "Compliance", href: "/admin/compliance", icon: <ClipboardCheck className="h-4 w-4" />, permission: "reports.view", featureFlag: "complianceReports" },
+    { name: "AI Workspace", href: "/admin/ai", icon: <Sparkles className="h-4 w-4" />, aiWorkspace: true },
     { name: "Settings", href: "/admin/settings", icon: <Settings className="h-4 w-4" />, permission: "settings.view" },
 ]
 
@@ -50,6 +51,8 @@ export default function ClientAdminLayout({
     const [permissions, setPermissions] = useState<Record<string, boolean>>({})
     const [featureFlags, setFeatureFlags] = useState(DEFAULT_TENANT_FEATURE_FLAGS)
     const [workflowConfig, setWorkflowConfig] = useState(DEFAULT_TENANT_WORKFLOW_CONFIG)
+    // AI Workspace: shown when it is switched on for this workspace, or to admins (so they can find it to set it up).
+    const [aiVisible, setAiVisible] = useState(false)
     const [integrationAlerts, setIntegrationAlerts] = useState<
         Array<{ provider: string; reason?: string; detectedAt?: string }>
     >([])
@@ -191,6 +194,13 @@ export default function ClientAdminLayout({
             }
 
             try {
+                const aiRes = await apiGet<{ enabled: boolean; canManage: boolean }>("/ai/status")
+                setAiVisible(Boolean(aiRes.data?.enabled || aiRes.data?.canManage))
+            } catch {
+                setAiVisible(false)
+            }
+
+            try {
                 const alertsRes = await apiGet<any[]>("/integrations/alerts")
                 setIntegrationAlerts(Array.isArray(alertsRes.data) ? alertsRes.data : [])
             } catch {
@@ -261,7 +271,8 @@ export default function ClientAdminLayout({
             const hasPermissionAccess = !item.permission || hasPermission(permissions as any, item.permission as any)
             const featureFlag = (item as { featureFlag?: TenantFeatureKey }).featureFlag
             const hasFeatureAccess = !featureFlag || featureFlags[featureFlag]
-            return hasPermissionAccess && hasFeatureAccess
+            const hasAiAccess = !(item as { aiWorkspace?: boolean }).aiWorkspace || aiVisible
+            return hasPermissionAccess && hasFeatureAccess && hasAiAccess
         })
         .flatMap((item) => {
             if (item.name !== "Job" || !featureFlags.plannerNotes) {

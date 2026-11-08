@@ -75,8 +75,10 @@ const getAuthHeaders = (path: string) => {
     return headers;
 };
 
-export const apiRequest = async <T>(path: string, options: RequestInit = {}) => {
-    if (typeof window !== "undefined") {
+export const apiRequest = async <T>(path: string, requestOptions: RequestInit & { silent?: boolean } = {}) => {
+    // silent: no full-screen loader (used for background polling, e.g. AI Workspace runs).
+    const { silent, ...options } = requestOptions;
+    if (typeof window !== "undefined" && !silent) {
         startLoading();
     }
     const method = (options.method ?? "GET").toUpperCase()
@@ -144,13 +146,14 @@ export const apiRequest = async <T>(path: string, options: RequestInit = {}) => 
 
         return payload as ApiResult<T>;
     } finally {
-        if (typeof window !== "undefined") {
+        if (typeof window !== "undefined" && !silent) {
             stopLoading();
         }
     }
 };
 
 export const apiGet = async <T>(path: string) => apiRequest<T>(path);
+export const apiGetSilent = async <T>(path: string) => apiRequest<T>(path, { silent: true });
 
 export const apiPost = async <T>(path: string, body?: unknown, options: RequestInit = {}) =>
     apiRequest<T>(path, {
